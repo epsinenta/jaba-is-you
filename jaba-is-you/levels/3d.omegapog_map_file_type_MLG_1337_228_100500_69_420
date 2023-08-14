@@ -1,0 +1,18 @@
+default 32 18
+29 0 1 frog True
+30 0 1 is False
+31 0 1 3d False
+10 3 1 wall False
+13 4 1 wall False
+20 7 1 wall False
+7 10 1 wall False
+24 10 1 wall False
+1 12 1 wall False
+7 12 1 frog False
+11 12 1 wall False
+25 12 1 wall False
+0 13 1 wall False
+7 14 1 wall False
+10 15 1 wall False
+25 15 1 wall False
+20 16 1 wall False

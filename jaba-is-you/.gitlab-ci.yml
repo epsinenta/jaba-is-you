@@ -1,0 +1,114 @@
+# Change pip's cache directory to be inside the project directory since we can
+# only cache local items.
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+stages:          # List of stages for jobs, and their order of execution
+  - build
+  - deploy
+
+linux build:
+  image: python:3.9
+  stage: build
+  script:
+    - apt update
+    - apt install -y libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev libfreetype6-dev libportmidi-dev libjpeg-dev python3-setuptools python3-dev python3-numpy fontconfig
+    - python -m venv venv
+    - source venv/bin/activate
+    - python -m pip install -U pyinstaller
+    - python -m pip install -r requirements.txt
+    - pyinstaller -y -w --add-data "lang:lang" --add-data "map_levels:map_levels" --add-data "fonts:fonts" --add-data "sprites:sprites" --add-data "palettes:palettes" --add-data "jaba_is_logo.png:." --add-data "saves:saves" --add-data "levels:levels" main.py
+    - tar cfJ jaba_is_you-linux.tar.xz dist/main/
+    - deactivate
+  cache:
+    key: linux-build-cache
+    paths:
+      - .cache/pip
+      - venv/
+  artifacts:
+    paths:
+      - jaba_is_you-linux.tar.xz
+    expire_in: 3 weeks
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+windows build:
+  image: ubuntu:20.04
+  stage: build
+  script:
+    - export DEBIAN_FRONTEND=noninteractive
+    - echo "deb http://mirror.yandex.ru/ubuntu/ focal main" >> /etc/apt/sources.list
+    - echo "deb-src http://mirror.yandex.ru/ubuntu/ focal main" >> /etc/apt/sources.list
+    # apt-fast
+    - echo -e "\e[0Ksection_start:`date +%s`:downloading_apt-fast[collapsed=true]\r\e[0KDownload and setting up apt fast"
+    - apt update
+    - apt install -y unzip wget aria2
+    - wget -nc -O apt-fast.zip https://github.com/ilikenwf/apt-fast/archive/refs/heads/master.zip || true
+    - unzip apt-fast.zip
+    - cp apt-fast-master/apt-fast /usr/local/sbin/
+    - chmod +x /usr/local/sbin/apt-fast
+    - cp apt-fast-master/apt-fast.conf /etc
+    - echo debconf apt-fast/aptmanager string apt | debconf-set-selections
+    - echo debconf apt-fast/maxdownloads string 20 | debconf-set-selections
+    - echo "MIRRORS=( 'http://archive.ubuntu.com/ubuntu, http://mirror.yandex.ru/ubuntu/' )" >> /etc/apt-fast.conf # О боже. Этот синтаксис...
+    - echo -e "\e[0Ksection_end:`date +%s`:downloading_apt-fast\r\e[0K"
+    - apt-fast update
+    # winehq
+    - echo -e "\e[0Ksection_start:`date +%s`:downloading_deps[collapsed=true]\r\e[0KDownloading and setting up winehq and other dependencies"
+    - dpkg --add-architecture i386
+    - wget -nc -O /usr/share/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key || true
+    - wget -nc -P /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/focal/winehq-focal.sources || true
+    - apt-fast update && apt-fast install -y --install-recommends winehq-stable xvfb xz-utils
+    - echo -e "\e[0Ksection_end:`date +%s`:downloading_deps\r\e[0K"
+    # winetricks
+    - echo -e "\e[0Ksection_start:`date +%s`:use-winetricks[collapsed=true]\r\e[0KDownloading winetricks and using it"
+    - wget -nc https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks || true
+    - chmod +x winetricks
+    - ./winetricks win10
+    - echo -e "\e[0Ksection_end:`date +%s`:use-winetricks\r\e[0K"
+    # python installation
+    - echo -e "\e[0Ksection_start:`date +%s`:downloading_python[collapsed=true]\r\e[0KDownloading and installing python in winehq"
+    - wget -nc https://www.python.org/ftp/python/3.9.13/python-3.9.13.exe || true
+    - Xvfb :99 &
+    - export DISPLAY=:99
+    - wine python-3.9.13.exe /quiet InstallAllUsers=1 PrependPath=1
+    - echo -e "\e[0Ksection_end:`date +%s`:downloading_python\r\e[0K"
+    # python usage
+    - echo -e "\e[0Ksection_start:`date +%s`:building_project[collapsed=true]\r\e[0KBuild .py into .exe"
+    - wine python -m pip install wheel
+    - wine python -m pip install pyinstaller
+    - wine python -m pip install -r requirements.txt
+    - wine pyinstaller -y -w --add-data "lang;lang" --add-data "map_levels;map_levels" --add-data "fonts;fonts" --add-data "sprites;sprites" --add-data "palettes;palettes" --add-binary "jaba_is_logo.png;." --add-data "saves;saves" --add-data "levels;levels" main.py
+    - tar cfJ jaba_is_you-windows.tar.xz dist/
+    - echo -e "\e[0Ksection_end:`date +%s`:building_project\r\e[0K"
+  cache:
+    key: windows-build
+    paths:
+      - python-3.9.13.exe
+      - winetricks
+      - apt-fast.zip
+  artifacts:
+    paths:
+      - jaba_is_you-windows.tar.xz
+    expire_in: 3 weeks
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+deploy to heroku:
+  image:
+    name: alpine/git
+    entrypoint: [""]
+  stage: deploy
+  script:
+    - rm -rf jaba-is-you || true
+    - git clone https://heroku:$HEROKU_API_KEY@git.heroku.com/jaba-is-you.git
+    - mv jaba_is_you-windows.tar.xz ./jaba-is-you/jaba_is_you-windows.tar.xz
+    - mv jaba_is_you-linux.tar.xz ./jaba-is-you/jaba_is_you-linux.tar.xz
+    - cd jaba-is-you/
+    - git config --global user.name "CI/CD"
+    - git config --global user.email "quswadress@gitlab.informatics.ru"
+    - git add .
+    - git commit --allow-empty -m "add executables for Windows 10 and Ubuntu"
+    - git push --progress origin HEAD:main
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"

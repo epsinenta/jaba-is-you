@@ -1,0 +1,5 @@
+pygame~=2.1.2
+httpx~=0.22.0
+h2~=4.1.0
+sphinx~=4.4.0
+sphinx-autodoc-typehints~=1.17.0
